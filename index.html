@@ -300,33 +300,44 @@
     appId: "PASTE_YOUR_APP_ID"
   };
 
-  firebase.initializeApp(firebaseConfig);
-  const _db = firebase.firestore();
-  const _auth = firebase.auth();
+  // If the placeholder values above haven't been replaced with a real
+  // Firebase project's config yet, don't touch the Firebase SDK at all —
+  // skip straight to "no persistence" so the app behaves exactly like it
+  // did before Firebase was added, with zero delay.
+  const _isPlaceholderConfig = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PASTE_YOUR');
+
+  let _db = null;
+  let _auth = null;
+  if (!_isPlaceholderConfig) {
+    firebase.initializeApp(firebaseConfig);
+    _db = firebase.firestore();
+    _auth = firebase.auth();
+  }
 
   let _uid = null;
-  let _firebaseUnavailable = false;
-  const _authReady = new Promise((resolve) => {
-    _auth.onAuthStateChanged((user) => {
-      if (user) {
-        _uid = user.uid;
-        resolve(user.uid);
-      } else {
-        _auth.signInAnonymously().catch((err) => console.error('Anonymous sign-in failed', err));
-      }
-    });
-    // Safety net: if Firebase isn't reachable or isn't configured yet (e.g. the
-    // placeholder config values above haven't been replaced), don't hang the
-    // whole app forever waiting on a sign-in that will never succeed. Fall back
-    // to "no persistence" after 4s so the app still boots and works normally.
-    setTimeout(() => {
-      if (!_uid) {
-        console.warn('Firebase did not respond in time — continuing without persistence. Check your firebaseConfig values.');
-        _firebaseUnavailable = true;
-        resolve(null);
-      }
-    }, 4000);
-  });
+  let _firebaseUnavailable = _isPlaceholderConfig;
+  const _authReady = _isPlaceholderConfig
+    ? Promise.resolve(null)
+    : new Promise((resolve) => {
+        _auth.onAuthStateChanged((user) => {
+          if (user) {
+            _uid = user.uid;
+            resolve(user.uid);
+          } else {
+            _auth.signInAnonymously().catch((err) => console.error('Anonymous sign-in failed', err));
+          }
+        });
+        // Safety net for real (non-placeholder) configs: if Firebase is
+        // unreachable for some other reason (network issue, misconfigured
+        // project), don't hang forever — fall back to "no persistence" after 4s.
+        setTimeout(() => {
+          if (!_uid) {
+            console.warn('Firebase did not respond in time — continuing without persistence.');
+            _firebaseUnavailable = true;
+            resolve(null);
+          }
+        }, 4000);
+      });
 
   function _docRef(key, shared) {
     return shared
