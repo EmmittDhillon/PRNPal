@@ -305,6 +305,7 @@
   const _auth = firebase.auth();
 
   let _uid = null;
+  let _firebaseUnavailable = false;
   const _authReady = new Promise((resolve) => {
     _auth.onAuthStateChanged((user) => {
       if (user) {
@@ -314,6 +315,17 @@
         _auth.signInAnonymously().catch((err) => console.error('Anonymous sign-in failed', err));
       }
     });
+    // Safety net: if Firebase isn't reachable or isn't configured yet (e.g. the
+    // placeholder config values above haven't been replaced), don't hang the
+    // whole app forever waiting on a sign-in that will never succeed. Fall back
+    // to "no persistence" after 4s so the app still boots and works normally.
+    setTimeout(() => {
+      if (!_uid) {
+        console.warn('Firebase did not respond in time — continuing without persistence. Check your firebaseConfig values.');
+        _firebaseUnavailable = true;
+        resolve(null);
+      }
+    }, 4000);
   });
 
   function _docRef(key, shared) {
@@ -334,6 +346,7 @@
   window.storage = {
     async get(key, shared = false) {
       await _authReady;
+      if (_firebaseUnavailable) throw new Error('Storage unavailable (Firebase not configured)');
       const snap = await _docRef(key, shared).get();
       if (!snap.exists) throw new Error(`Key not found: ${key}`);
       const data = snap.data();
@@ -341,6 +354,7 @@
     },
     async set(key, value, shared = false) {
       await _authReady;
+      if (_firebaseUnavailable) return null;
       await _docRef(key, shared).set({
         key,
         value,
@@ -350,11 +364,13 @@
     },
     async delete(key, shared = false) {
       await _authReady;
+      if (_firebaseUnavailable) return null;
       await _docRef(key, shared).delete();
       return { key, deleted: true, shared };
     },
     async list(prefix = '', shared = false) {
       await _authReady;
+      if (_firebaseUnavailable) return { keys: [], prefix: prefix || undefined, shared };
       let query = _collectionRef(shared);
       if (prefix) {
         query = query.where('key', '>=', prefix).where('key', '<', prefix + '\uf8ff');
